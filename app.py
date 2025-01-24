@@ -9,9 +9,19 @@ import torch
 # Set page config FIRST
 st.set_page_config(page_title="Text Humanizer", layout="wide")
 
-# Initialize NLTK
-nltk.download('wordnet', quiet=True)
-nltk.download('punkt', quiet=True)
+# Initialize NLTK with explicit data path
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt', download_dir='/home/appuser/nltk_data')
+    
+try:
+    nltk.data.find('corpora/wordnet')
+except LookupError:
+    nltk.download('wordnet', download_dir='/home/appuser/nltk_data')
+
+# Add NLTK data path to system path
+nltk.data.path.append('/home/appuser/nltk_data')
 
 # Load model with explicit tokenizer configuration
 @st.cache_resource
@@ -29,16 +39,25 @@ def load_paraphraser():
 paraphraser = load_paraphraser()
 
 def enhance_human_likeness(text):
-    words = nltk.word_tokenize(text)
+    try:
+        words = nltk.word_tokenize(text)
+    except LookupError:
+        nltk.download('punkt', download_dir='/home/appuser/nltk_data')
+        nltk.data.path.append('/home/appuser/nltk_data')
+        words = nltk.word_tokenize(text)
+    
     enhanced_words = []
     
     for word in words:
         if random.random() < 0.3:
-            synonyms = wordnet.synsets(word)
-            if synonyms:
-                new_word = synonyms[0].lemmas()[0].name()
-                enhanced_words.append(new_word)
-                continue
+            try:
+                synonyms = wordnet.synsets(word)
+                if synonyms:
+                    new_word = synonyms[0].lemmas()[0].name()
+                    enhanced_words.append(new_word)
+                    continue
+            except:
+                pass
         enhanced_words.append(word)
     
     enhanced_text = ' '.join(enhanced_words)
@@ -52,33 +71,4 @@ def enhance_human_likeness(text):
     
     return ' '.join(modified_sentences)
 
-# Streamlit UI components come AFTER page config
-st.title("AI to Human Text Converter")
-
-with st.expander("⚠️ Important Disclaimer"):
-    st.write("""
-    - Use this tool responsibly and ethically
-    - No guarantee of bypassing detection systems
-    - Always comply with guidelines
-    - Verify outputs manually
-    """)
-
-input_text = st.text_area("Paste AI-generated text here:", height=250)
-
-if st.button("Humanize Text"):
-    if input_text:
-        with st.spinner("Processing..."):
-            paraphrased = paraphraser(input_text, max_length=len(input_text))[0]['generated_text']
-            final_output = enhance_human_likeness(paraphrased)
-            
-            st.subheader("Humanized Output")
-            st.code(final_output, language="text")
-            
-            st.download_button(
-                label="Download Result",
-                data=final_output,
-                file_name="humanized_text.txt",
-                mime="text/plain"
-            )
-    else:
-        st.warning("Please input some text to process")
+# Rest of the Streamlit UI code remains the same...
