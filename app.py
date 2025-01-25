@@ -7,35 +7,35 @@ import re
 from streamlit.components.v1 import html
 
 # Set page config
-st.set_page_config(page_title="Word-Preserving Humanizer", layout="wide", page_icon="✍️")
+st.set_page_config(page_title="Length-Preserving Humanizer", layout="wide", page_icon="📏")
 
 # Custom CSS
 st.markdown("""
 <style>
-@keyframes progress {
-    0% { width: 0%; }
-    100% { width: 100%; }
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.length-warning {
+    color: #ff6b6b;
+    font-weight: bold;
+    animation: pulse 2s infinite;
+}
+
+.progress-container {
+    height: 4px;
+    background: #f0f0f0;
+    margin: 15px 0;
+    border-radius: 2px;
 }
 
 .progress-bar {
-    height: 4px;
+    height: 100%;
     background: #4ecdc4;
-    width: 100%;
-    position: relative;
-    animation: progress 2s linear infinite;
-}
-
-.word-count {
-    color: #4ecdc4;
-    font-weight: bold;
-    margin: 10px 0;
-}
-
-.captcha-box {
-    border: 2px solid #4ecdc4;
-    padding: 15px;
-    border-radius: 8px;
-    margin: 15px 0;
+    width: 0%;
+    transition: width 0.3s ease;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -43,17 +43,19 @@ st.markdown("""
 # CAPTCHA system
 def generate_captcha():
     if 'captcha' not in st.session_state:
-        nums = [random.randint(1, 9) for _ in range(3)]
-        st.session_state.captcha = {
-            'question': f"{nums[0]} + {nums[1]} × {nums[2]}",
-            'answer': nums[0] + nums[1] * nums[2]
-        }
+        equation = f"{random.randint(5,10)} + {random.randint(1,5)}"
+        answer = eval(equation)
+        st.session_state.captcha = {'question': equation, 'answer': answer}
 
 # Progress animation
-def show_progress():
-    html('<div class="progress-bar"></div>')
+def update_progress(percent):
+    html(f"""
+    <div class="progress-container">
+        <div class="progress-bar" style="width: {percent}%"></div>
+    </div>
+    """)
 
-# Load model with word count preservation
+# Load model
 @st.cache_resource
 def load_paraphraser():
     model_name = "humarin/chatgpt_paraphraser_on_T5_base"
@@ -68,15 +70,15 @@ def load_paraphraser():
 
 paraphraser = load_paraphraser()
 
-def preserve_word_count(original, generated):
+def preserve_length(original, generated):
     original_words = original.split()
     generated_words = generated.split()
+    min_length = int(len(original_words) * 0.8)
     
-    # Add padding if generated is shorter
-    while len(generated_words) < len(original_words):
-        generated_words.append(random.choice(original_words))
+    if len(generated_words) < min_length:
+        needed = min_length - len(generated_words)
+        generated_words += random.sample(original_words, min(needed, len(original_words)))
     
-    # Trim if generated is longer
     return ' '.join(generated_words[:len(original_words)])
 
 def enhance_human_likeness(text):
@@ -85,13 +87,11 @@ def enhance_human_likeness(text):
     
     for sentence in sentences:
         words = sentence.split()
-        # Preserve word count while modifying
         for i in range(len(words)):
-            # Simple modifications that don't affect word count
-            if random.random() < 0.3:
-                words[i] = words[i].lower() if random.choice([True, False]) else words[i].upper()
-            if random.random() < 0.2:
-                words[i] = words[i] + random.choice([',', ';', ''])
+            if random.random() < 0.25:
+                words[i] = words[i].lower() if random.random() < 0.5 else words[i].upper()
+            if random.random() < 0.1:
+                words[i] += random.choice([',', ';', ''])
         modified.append(' '.join(words))
     
     return ' '.join(modified)
@@ -100,66 +100,73 @@ def enhance_human_likeness(text):
 generate_captcha()
 
 # UI Components
-st.title("🔠 Word-Preserving Humanizer")
-st.markdown("Maintains exact word count while humanizing AI text")
+st.title("📏 Length-Preserving Text Humanizer")
+st.markdown("Maintains **minimum 80%** of original text length")
 
-with st.expander("🔐 CAPTCHA Verification", expanded=True):
-    st.markdown(f"**Solve:** {st.session_state.captcha['question']}")
-    captcha_input = st.number_input("Enter answer:", step=1)
-    
-    if captcha_input and int(captcha_input) != st.session_state.captcha['answer']:
-        st.error("CAPTCHA verification failed. Please try again.")
-        st.stop()
+with st.expander("🔒 CAPTCHA Verification", expanded=True):
+    captcha_input = st.text_input(f"Solve: {st.session_state.captcha['question']} = ?", 
+                                placeholder="Enter answer to verify you're human")
+    if captcha_input:
+        if str(st.session_state.captcha['answer']) != captcha_input.strip():
+            st.error("CAPTCHA verification failed")
+            st.stop()
 
 input_text = st.text_area("Input Text:", height=300, 
-                        placeholder="Paste AI-generated text here (minimum 150 words)...")
+                        placeholder="Paste AI-generated text here (minimum 200 words)...")
 
 if input_text:
-    word_count = len(input_text.split())
-    st.markdown(f"<div class='word-count'>Input Word Count: {word_count}</div>", 
-               unsafe_allow_html=True)
+    original_length = len(input_text.split())
+    st.markdown(f"**Original Length:** {original_length} words")
+    st.markdown(f"**Minimum Target Length:** {int(original_length * 0.8)} words")
 
 if st.button("🔄 Humanize Text", type="primary") and input_text:
-    if len(input_text.split()) < 150:
-        st.warning("Minimum 150 words required")
+    if len(input_text.split()) < 200:
+        st.warning("Minimum 200 words required")
         st.stop()
     
-    with st.spinner("Processing..."):
-        show_progress()
-        start_time = time.time()
+    progress = st.empty()
+    start_time = time.time()
+    
+    try:
+        # Generate with length preservation
+        update_progress(20)
+        paraphrased = paraphraser(
+            input_text,
+            max_new_tokens=int(len(input_text.split()) * 1.2),
+            min_new_tokens=int(len(input_text.split()) * 0.8),
+            temperature=0.6,
+            repetition_penalty=2.0,
+            num_beams=4,
+            do_sample=True
+        )[0]['generated_text']
         
-        try:
-            # Generate with length control
-            paraphrased = paraphraser(
-                input_text,
-                max_new_tokens=len(input_text.split()) * 2,
-                min_new_tokens=len(input_text.split()),
-                temperature=0.7,
-                repetition_penalty=2.5,
-                num_beams=3
-            )[0]['generated_text']
-            
-            # Post-process for word count preservation
-            final_output = preserve_word_count(input_text, enhance_human_likeness(paraphrased))
-            
-            processing_time = time.time() - start_time
-            
-            st.markdown(f"<div class='word-count'>Output Word Count: {len(final_output.split())}</div>", 
+        update_progress(60)
+        final_output = preserve_length(input_text, enhance_human_likeness(paraphrased))
+        
+        update_progress(90)
+        processing_time = time.time() - start_time
+        
+        # Length validation
+        final_length = len(final_output.split())
+        length_ratio = final_length / original_length
+        
+        st.markdown(f"**Final Length:** {final_length} words")
+        if length_ratio < 0.8:
+            st.markdown("<div class='length-warning'>Warning: Could not maintain minimum length threshold</div>", 
                        unsafe_allow_html=True)
-            
-            st.success("✅ Processing Complete!")
-            st.text_area("Humanized Text:", value=final_output, height=300)
-            
-            st.download_button(
-                "📥 Download Result",
-                data=final_output,
-                file_name="humanized_text.txt",
-                mime="text/plain"
-            )
-            
-            # Refresh CAPTCHA
-            del st.session_state.captcha
-            generate_captcha()
-            
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
+        
+        st.text_area("Humanized Text:", value=final_output, height=300)
+        
+        st.download_button(
+            "📥 Download Result",
+            data=final_output,
+            file_name="humanized_text.txt",
+            mime="text/plain"
+        )
+        
+        update_progress(100)
+        time.sleep(0.5)
+        generate_captcha()
+        
+    except Exception as e:
+        st.error(f"Processing error: {str(e)}")
