@@ -1,108 +1,57 @@
 import streamlit as st
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
-import nltk
-from nltk.corpus import wordnet
+import spacy
 import random
 import torch
-import os
 
 # Set page config FIRST
 st.set_page_config(page_title="Text Humanizer", layout="wide")
 
-# Configure NLTK data path
-NLTK_DATA_PATH = os.path.join(os.getcwd(), "nltk_data")
-os.makedirs(NLTK_DATA_PATH, exist_ok=True)
-nltk.data.path.append(NLTK_DATA_PATH)
+# Load spaCy model
+@st.cache_resource
+def load_nlp():
+    try:
+        return spacy.load("en_core_web_sm")
+    except:
+        from spacy.cli import download
+        download("en_core_web_sm")
+        return spacy.load("en_core_web_sm")
 
-# Initialize NLTK with robust error handling
-def initialize_nltk():
-    resources = {
-        'punkt': ('tokenizers/punkt', ['punkt']),
-        'punkt_tab': ('tokenizers/punkt_tab', ['PY3', 'english.pickle']),
-        'wordnet': ('corpora/wordnet', ['wordnet'])
-    }
+nlp = load_nlp()
 
-    for resource, (path, files) in resources.items():
-        try:
-            nltk.data.find(path)
-        except LookupError:
-            try:
-                st.warning(f"Downloading {resource}...")
-                nltk.download(resource, download_dir=NLTK_DATA_PATH, quiet=True)
-                nltk.data.path.append(NLTK_DATA_PATH)
-                # Verify download
-                if not all(nltk.data.find(f"{path}/{f}") for f in files):
-                    raise LookupError
-            except Exception as e:
-                st.error(f"Failed to download {resource}: {str(e)}")
-                raise
-
-initialize_nltk()
-
-# Load model
+# Load paraphrasing model
 @st.cache_resource
 def load_paraphraser():
     model_name = "humarin/chatgpt_paraphraser_on_T5_base"
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
     return pipeline(
         "text2text-generation",
         model=model,
         tokenizer=tokenizer,
-        device=0 if torch.cuda.is_available() else -1,
-        max_length=512
+        device=0 if torch.cuda.is_available() else -1
     )
 
-try:
-    paraphraser = load_paraphraser()
-except Exception as e:
-    st.error(f"Model loading failed: {str(e)}")
-    st.stop()
+paraphraser = load_paraphraser()
 
-# Enhanced text processing with fallbacks
 def enhance_human_likeness(text):
-    try:
-        # Sentence tokenization with multiple fallbacks
-        try:
-            sentences = nltk.sent_tokenize(text)
-        except LookupError:
-            nltk.download('punkt', download_dir=NLTK_DATA_PATH, quiet=True)
-            sentences = nltk.sent_tokenize(text)
-            
-        modified_sentences = []
-        for sentence in sentences:
-            # Word tokenization with retry
-            try:
-                words = nltk.word_tokenize(sentence)
-            except LookupError:
-                nltk.download('punkt', download_dir=NLTK_DATA_PATH, quiet=True)
-                words = nltk.word_tokenize(sentence)
-            
-            # Synonym replacement
-            modified_words = []
-            for word in words:
-                if random.random() < 0.3:
-                    try:
-                        synonyms = wordnet.synsets(word)
-                        if synonyms:
-                            new_word = synonyms[0].lemmas()[0].name()
-                            modified_words.append(new_word)
-                            continue
-                    except:
-                        pass
-                modified_words.append(word)
-            
-            # Sentence restructuring
-            modified_sentence = ' '.join(modified_words)
-            if modified_sentence and modified_sentence[0].isupper():
-                modified_sentence = modified_sentence[0].lower() + modified_sentence[1:]
-            modified_sentences.append(modified_sentence)
-            
-        return ' '.join(modified_sentences)
+    doc = nlp(text)
+    modified_sentences = []
     
-    except Exception as e:
-        st.error(f"Text processing error: {str(e)}")
-        return text
+    for sent in doc.sents:
+        words = [token.text for token in sent]
+        # Random word modifications
+        for i in range(len(words)):
+            if random.random() < 0.3:
+                words[i] = words[i].lower() if random.random() < 0.5 else words[i].upper()
+        
+        # Sentence structure variation
+        modified = " ".join(words)
+        if modified and modified[0].isupper():
+            modified = modified[0].lower() + modified[1:]
+        modified_sentences.append(modified)
+    
+    return " ".join(modified_sentences)
 
 # Streamlit UI
 st.title("AI to Human Text Converter")
@@ -117,11 +66,11 @@ with st.expander("⚠️ Important Disclaimer"):
 input_text = st.text_area("Paste AI-generated text here:", height=250)
 
 if st.button("Humanize Text") and input_text:
-    with st.spinner("Processing... (20-60 seconds)"):
+    with st.spinner("Processing..."):
         try:
             paraphrased = paraphraser(
                 input_text,
-                num_return_sequences=1,
+                max_length=512,
                 num_beams=5,
                 temperature=0.7,
                 repetition_penalty=2.5
